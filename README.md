@@ -16,7 +16,18 @@ Claude Code session ──(收工前更新)──▶ ~/.project-tracker/projects
 - **選單列即時顯示**：每個專案顯示狀態、待辦完成度、下一步、卡關事項、最後更新時間與 agent；超過 7 天沒更新的進行中專案會以橘色標示時間
 - **待決徽章**：有卡關／待決事項時，選單列圖示旁會顯示數字
 - **一鍵交接**：「複製交接 prompt」會把目前狀態、下一步、未完成待辦、卡關與最近歷程組成一段文字，直接貼給新的 agent
-- 點卡片可展開完整內容；「開啟進度檔」用預設編輯器開啟 Markdown
+
+### 在 App 裡直接編輯
+
+- **清單頁只放摘要，點卡片進入分段的詳細頁**：目前狀態、下一步、待辦、卡關／待決事項、歷程各自成塊，有專屬顏色與圖示（清單頁的小標籤用同樣配色）
+- **每一段都能新增、編輯、刪除**：按區段右上角的 ＋ 新增（Enter 送出、可連續新增、Esc 取消）；雙擊項目或滑過後按 ✏️ 編輯；滑過按 🗑 刪除
+- **待辦勾選與「待確認」**：agent 做完的待辦會標成 `- [?]`（⏳ 待確認），你按「確認」才算完成，或按「退回」改回未完成；也有「全部確認」
+- **處理卡關**：每個待決事項可以按「已解決」，或按「決定…」寫下你的決定。決定會放到「下一步」第一項並寫進歷程，下一個 agent 就會照做
+- **改狀態、改名**：詳細頁右上角的狀態選單；雙擊專案名稱可改名
+- **管理追蹤的專案**：清單頁 ＋ 選資料夾就能新增；卡片右鍵可改狀態、複製交接 prompt、在 Finder 顯示、停止追蹤
+- **停止追蹤**：進度檔移到垃圾桶（可救回），資料夾加入忽略清單，Claude Code 不會再要求為它更新
+
+App 寫入時會「重新讀檔 → 只改動被編輯的區段 → 原子寫回」，盡量避免和正在收工的 agent 互相覆蓋。
 
 ## 系統需求
 
@@ -79,7 +90,8 @@ RAG 檢索模組完成，正在調整 chunk 大小。
 - 2026-11-10 21:30 完成 RAG 檢索模組
 ```
 
-- 待辦完成度由 `- [x]`／`- [ ]` 自動計算
+- 待辦有三種標記：`- [ ]` 未完成、`- [?]` agent 回報完成（待使用者確認）、`- [x]` 使用者已確認；完成度只計算 `- [x]`
+- 選單列徽章數字 = 卡關／待決事項 + 待確認待辦（暫停與已完成的專案不計）
 - 「卡關／待決事項」每一項都會計入選單列徽章；寫「（無）」代表沒有
 - 「（…）」整行括號的文字視為佔位內容，不會顯示
 - 最後更新時間取檔案修改時間與 `updated` 欄位中較新者
@@ -109,6 +121,7 @@ RAG 檢索模組完成，正在調整 chunk 大小。
 - Stop hook 只偵測 Edit／Write／MultiEdit／NotebookEdit 工具的修改；只用 Bash 改檔案的 session 不會被提醒（全域規則仍會要求 agent 更新）
 - 網頁版／雲端的 Claude Code session 無法寫入本機檔案，目前只支援本機 session
 - 目前只針對 Claude Code；其他 agent 只要照同樣格式寫進度檔，App 一樣能顯示
+- 在 App 裡編輯某個區段時，該區段會以標準格式重寫：清單型區段（下一步、待辦、卡關）裡非清單的散文會被移除，其他區段不受影響
 
 ## 專案結構
 
@@ -116,10 +129,13 @@ RAG 檢索模組完成，正在調整 chunk 大小。
 bin/ptrack                      CLI 與 Stop hook（Python 標準函式庫）
 Sources/ProjectTracker/         SwiftUI 選單列 App
   App.swift                     MenuBarExtra 進入點與圖示徽章
-  Store.swift                   FSEvents 監聽與載入
-  Parser.swift                  Markdown + frontmatter 解析
-  Models.swift                  資料模型
-  Views.swift                   介面
+  Store.swift                   FSEvents 監聽、載入、編輯／新增／停止追蹤
+  Document.swift                進度檔的讀寫模型（保留未知區段，只改寫被編輯的區段）
+  Parser.swift                  轉成顯示用資料、清單與待辦解析
+  Models.swift                  資料模型（專案狀態、待辦三態）
+  ListView.swift                清單頁、右鍵選單、設定
+  DetailView.swift              分段詳細頁與各區段的編輯功能
+  Components.swift              共用元件（區段框、可編輯列、新增欄位、配色）
   Handoff.swift                 交接 prompt 產生
 Resources/Info.plist            App 設定（LSUIElement：不顯示在 Dock）
 Resources/AppIcon.icns          App 圖示（由 scripts/make-icon.swift 產生）

@@ -23,6 +23,9 @@ enum Handoff {
         if !p.openTodos.isEmpty {
             out.append("\n## 未完成待辦\n" + p.openTodos.map { "- [ ] \($0.text)" }.joined(separator: "\n"))
         }
+        if !p.pendingTodos.isEmpty {
+            out.append("\n## 待使用者確認（agent 回報已完成）\n" + p.pendingTodos.map { "- [?] \($0.text)" }.joined(separator: "\n"))
+        }
         if !p.blockers.isEmpty {
             out.append("\n## 卡關／待決事項\n" + p.blockers.map { "- \($0)" }.joined(separator: "\n"))
         }

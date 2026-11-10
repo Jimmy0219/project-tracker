@@ -29,11 +29,37 @@ enum ProjectStatus: String, CaseIterable {
         case .unknown: return "未標示"
         }
     }
+
+    /// 使用者可以手動設定的狀態。
+    static var selectable: [ProjectStatus] { [.inProgress, .blocked, .paused, .done] }
+}
+
+/// 待辦狀態：agent 做完的標 `[?]`（待使用者確認），使用者確認後才變成 `[x]`。
+enum TodoState: CaseIterable {
+    case open, pending, done
+
+    var marker: String {
+        switch self {
+        case .open: return "[ ]"
+        case .pending: return "[?]"
+        case .done: return "[x]"
+        }
+    }
+
+    var acceptedMarkers: [String] {
+        switch self {
+        case .open: return ["[ ]"]
+        case .pending: return ["[?]"]
+        case .done: return ["[x]", "[X]"]
+        }
+    }
 }
 
 struct TodoItem: Hashable {
-    let done: Bool
-    let text: String
+    var state: TodoState
+    var text: String
+
+    var done: Bool { state == .done }
 }
 
 struct ProjectProgress: Identifiable {
@@ -50,19 +76,21 @@ struct ProjectProgress: Identifiable {
     var blockers: [String]
     var history: [String]
 
-    var doneCount: Int { todos.filter(\.done).count }
+    var doneCount: Int { todos.filter { $0.state == .done }.count }
+    var pendingCount: Int { todos.filter { $0.state == .pending }.count }
     var totalCount: Int { todos.count }
     var fraction: Double { totalCount == 0 ? 0 : Double(doneCount) / Double(totalCount) }
-    var openTodos: [TodoItem] { todos.filter { !$0.done } }
+    var openTodos: [TodoItem] { todos.filter { $0.state == .open } }
+    var pendingTodos: [TodoItem] { todos.filter { $0.state == .pending } }
 
     /// 有卡關事項但狀態仍標示進行中時，顯示為卡關。
     var effectiveStatus: ProjectStatus {
         if status == .done || status == .paused { return status }
-        return blockers.isEmpty ? (status == .blocked ? .blocked : status) : .blocked
+        return blockers.isEmpty ? status : .blocked
     }
 
-    /// 需要使用者注意的事項數（已完成／暫停的專案不計）。
-    var attentionCount: Int {
-        (status == .done || status == .paused) ? 0 : blockers.count
-    }
+    var isActive: Bool { status != .done && status != .paused }
+
+    /// 需要使用者處理的事項數：待決事項＋待確認的待辦（已完成／暫停的專案不計）。
+    var attentionCount: Int { isActive ? blockers.count + pendingCount : 0 }
 }

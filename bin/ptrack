@@ -320,7 +320,7 @@ def cmd_hook_stop(_args: list[str]) -> int:
         f"[project-tracker] 你這次修改了專案 {root.name} 的檔案，但還沒{action}進度檔。"
         f"收工前請：\n"
         f"1. {'' if pfile.exists() else f'執行 `{ptrack} init` 建立進度檔，然後'}"
-        f"編輯 {pfile}：更新「目前狀態」「下一步」「待辦」（- [x]／- [ ]）「卡關／待決事項」，"
+        f"編輯 {pfile}：更新「目前狀態」「下一步」「待辦」（你完成的標 - [?] 待使用者確認，未完成 - [ ]，不要自己標 - [x]）「卡關／待決事項」，"
         f"並視情況調整 frontmatter 的 status（in_progress／blocked／paused／done）。\n"
         f"2. 執行 `{ptrack} log \"<一句話描述這次做了什麼>\"` 追加歷程。\n"
         f"3. 執行 `{ptrack} stamp --agent \"Claude Code (<你的模型名稱>)\"`。\n"
