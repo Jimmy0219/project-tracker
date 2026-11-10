@@ -122,9 +122,17 @@ Sources/ProjectTracker/         SwiftUI 選單列 App
   Views.swift                   介面
   Handoff.swift                 交接 prompt 產生
 Resources/Info.plist            App 設定（LSUIElement：不顯示在 Dock）
+Resources/AppIcon.icns          App 圖示（由 scripts/make-icon.swift 產生）
 templates/claude-md-snippet.md  寫入 ~/.claude/CLAUDE.md 的規則
 scripts/build-app.sh            用 swiftc 編譯並打包 .app
 scripts/install.sh              一鍵安裝
+scripts/make-icon.swift         用程式繪製 App 圖示並輸出 iconset
+```
+
+重新產生圖示：
+
+```bash
+swiftc scripts/make-icon.swift -o build/make-icon && build/make-icon build/AppIcon.iconset && iconutil -c icns build/AppIcon.iconset -o Resources/AppIcon.icns
 ```
 
 ## 解除安裝

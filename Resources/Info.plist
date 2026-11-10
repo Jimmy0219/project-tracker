@@ -6,6 +6,8 @@
     <string>zh_TW</string>
     <key>CFBundleExecutable</key>
     <string>ProjectTracker</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>io.github.jimmy0219.projecttracker</string>
     <key>CFBundleName</key>

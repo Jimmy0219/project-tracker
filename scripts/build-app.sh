@@ -38,6 +38,7 @@ swiftc -O \
   "$ROOT"/Sources/ProjectTracker/*.swift
 
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 echo "▸ ad-hoc 簽章…"
 codesign --force --sign - "$APP" >/dev/null
