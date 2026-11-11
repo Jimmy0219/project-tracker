@@ -4,6 +4,8 @@ import AppKit
 
 /// 監聽 ~/.project-tracker/，檔案一有變動就重新載入；也負責所有寫回進度檔的動作。
 final class ProgressStore: ObservableObject {
+    static let shared = ProgressStore()
+
     @Published private(set) var projects: [ProjectProgress] = []
     @Published var errorMessage: String?
 

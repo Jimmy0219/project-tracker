@@ -91,14 +91,14 @@ struct SectionBox<Content: View, Accessory: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: SectionStyle.icon(kind))
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 20, height: 20)
+                    .frame(width: 24, height: 24)
                     .background(SectionStyle.tint(kind), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                Text(kind.title).font(.subheadline.weight(.semibold))
+                Text(kind.title).font(.headline)
                 if let count, count > 0 {
                     Text("\(count)")
                         .font(.caption2.weight(.semibold).monospacedDigit())
@@ -112,7 +112,8 @@ struct SectionBox<Content: View, Accessory: View>: View {
             }
             content
         }
-        .padding(10)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(SectionStyle.tint(kind).opacity(0.06))
@@ -183,7 +184,7 @@ struct EditableRow<Leading: View, Extra: View>: View {
                 .opacity(hovering ? 1 : 0)
             }
         }
-        .font(.callout)
+        .font(.body)
         .onHover { hovering = $0 }
     }
 
@@ -232,7 +233,7 @@ struct AddField: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
         }
-        .font(.callout)
+        .font(.body)
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
 

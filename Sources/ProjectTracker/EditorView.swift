@@ -1,112 +1,148 @@
 import SwiftUI
 import AppKit
 
-/// 單一專案的詳細頁：每個區段獨立成塊，可新增、編輯、刪除。
-struct ProjectDetailView: View {
-    @EnvironmentObject var store: ProgressStore
+/// 主視窗右側的編輯區：頁首（名稱、狀態、動作）＋各區段；寬度足夠時分成左右兩欄。
+struct ProjectEditorView: View {
     let project: ProjectProgress
-    let onBack: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            DetailHeader(project: project, onBack: onBack)
+            EditorHeader(project: project)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    StateSection(project: project)
-                    NextStepsSection(project: project)
-                    TodoSection(project: project)
-                    BlockerSection(project: project)
-                    HistorySection(project: project)
-                    Text("提示：雙擊項目可編輯；滑過項目會出現編輯與刪除按鈕。")
-                        .font(.caption2)
+            GeometryReader { geo in
+                ScrollView {
+                    Group {
+                        if geo.size.width >= 760 {
+                            HStack(alignment: .top, spacing: 14) {
+                                VStack(spacing: 14) {
+                                    StateSection(project: project)
+                                    NextStepsSection(project: project)
+                                    BlockerSection(project: project)
+                                }
+                                VStack(spacing: 14) {
+                                    TodoSection(project: project)
+                                    HistorySection(project: project, limit: 10)
+                                }
+                            }
+                        } else {
+                            VStack(spacing: 14) {
+                                StateSection(project: project)
+                                NextStepsSection(project: project)
+                                TodoSection(project: project)
+                                BlockerSection(project: project)
+                                HistorySection(project: project, limit: 10)
+                            }
+                        }
+                    }
+                    .padding(18)
+                    Text("提示：雙擊項目可編輯；滑過項目會出現編輯與刪除按鈕；按 ＋ 新增，Esc 取消。")
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.bottom, 16)
                 }
-                .padding(10)
             }
-            .frame(maxHeight: 520)
-            Divider()
-            DetailFooter(project: project)
         }
     }
 }
 
-// MARK: - 頁首：返回、名稱、狀態
+// MARK: - 頁首：名稱、狀態、資訊、動作
 
-struct DetailHeader: View {
+struct EditorHeader: View {
     @EnvironmentObject var store: ProgressStore
     let project: ProjectProgress
-    let onBack: () -> Void
     @State private var editingName = false
     @State private var nameDraft = ""
+    @State private var copied = false
     @FocusState private var nameFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Button(action: onBack) {
-                    Label("全部專案", systemImage: "chevron.left").font(.callout)
-                }
-                .buttonStyle(.borderless)
-                Spacer()
-                Menu {
-                    StatusMenuItems(current: project.status) { store.setStatus(project, $0) }
-                } label: {
-                    HStack(spacing: 3) {
-                        StatusBadge(status: project.effectiveStatus)
-                        Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("變更專案狀態")
-            }
-            if editingName {
-                HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if editingName {
                     TextField("專案名稱", text: $nameDraft)
                         .textFieldStyle(.roundedBorder)
+                        .font(.title2)
                         .focused($nameFocused)
                         .onSubmit(saveName)
                         .onExitCommand { editingName = false }
-                    Button("儲存", action: saveName).controlSize(.small)
-                }
-            } else {
-                Text(project.name)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
-                    .onTapGesture(count: 2) {
-                        nameDraft = project.name
-                        editingName = true
-                        DispatchQueue.main.async { nameFocused = true }
-                    }
-                    .help("雙擊可改名")
-            }
-            HStack(spacing: 4) {
-                Text("更新於 \(relativeTime(project.updated))")
-                if !project.agent.isEmpty { Text("· \(project.agent)") }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            if !project.projectPath.isEmpty {
-                Button {
-                    revealInFinder(project.projectPath)
-                } label: {
-                    Label(project.projectPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
-                          systemImage: "folder")
+                        .frame(maxWidth: 420)
+                    Button("儲存", action: saveName)
+                } else {
+                    Text(project.name)
+                        .font(.title2.weight(.semibold))
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .onTapGesture(count: 2, perform: startRename)
+                        .help("雙擊可改名")
+                    Button(action: startRename) { Image(systemName: "pencil") }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .help("改名")
                 }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .help("在 Finder 顯示專案資料夾")
+                StatusBadge(status: project.effectiveStatus)
+                Spacer()
+                Menu("變更狀態") {
+                    StatusMenuItems(current: project.status) { store.setStatus(project, $0) }
+                }
+                .fixedSize()
+                .help("把專案標為進行中／卡關／暫停／已完成")
+            }
+
+            HStack(spacing: 12) {
+                Label("更新於 \(relativeTime(project.updated))", systemImage: "clock")
+                    .lineLimit(1)
+                    .fixedSize()
+                if !project.agent.isEmpty {
+                    Label(project.agent, systemImage: "cpu").lineLimit(1).fixedSize()
+                }
+                if !project.projectPath.isEmpty {
+                    Button {
+                        revealInFinder(project.projectPath)
+                    } label: {
+                        Label(project.projectPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
+                              systemImage: "folder")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("在 Finder 顯示專案資料夾")
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button {
+                    copyToPasteboard(Handoff.prompt(for: project))
+                    withAnimation { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withAnimation { copied = false } }
+                } label: {
+                    Label(copied ? "已複製" : "複製交接 prompt", systemImage: copied ? "checkmark" : "doc.on.clipboard")
+                }
+                .help("把目前進度組成一段文字，貼給新的 agent 接手")
+                Button {
+                    NSWorkspace.shared.open(project.fileURL)
+                } label: {
+                    Label("開啟進度檔", systemImage: "doc.text")
+                }
+                Spacer()
+                Menu {
+                    Button("在 Finder 顯示進度檔") { revealInFinder(project.fileURL.path) }
+                    Divider()
+                    Button("停止追蹤…", role: .destructive) { store.stopTracking(project) }
+                } label: {
+                    Label("更多", systemImage: "ellipsis.circle")
+                }
+                .fixedSize()
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private func startRename() {
+        nameDraft = project.name
+        editingName = true
+        DispatchQueue.main.async { nameFocused = true }
     }
 
     private func saveName() {
@@ -392,11 +428,12 @@ struct BlockerSection: View {
 
 struct HistorySection: View {
     let project: ProjectProgress
+    var limit = 5
     @State private var showAll = false
 
     var body: some View {
         SectionBox(kind: .history, count: project.history.count) {
-            if project.history.count > 5 {
+            if project.history.count > limit {
                 Button(showAll ? "收合" : "顯示全部") { showAll.toggle() }
                     .buttonStyle(.borderless)
                     .font(.caption)
@@ -406,7 +443,7 @@ struct HistorySection: View {
             if items.isEmpty {
                 EmptyHint(text: "還沒有歷程紀錄")
             } else {
-                ForEach(Array((showAll ? items : Array(items.prefix(5))).enumerated()), id: \.offset) { _, entry in
+                ForEach(Array((showAll ? items : Array(items.prefix(limit))).enumerated()), id: \.offset) { _, entry in
                     HistoryEntry(text: entry)
                 }
             }
@@ -424,8 +461,8 @@ struct HistoryEntry: View {
             Text(parts.time)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 92, alignment: .leading)
-            Text(parts.message).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: 100, alignment: .leading)
+            Text(parts.message).font(.body).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -435,48 +472,5 @@ struct HistoryEntry: View {
         }
         let time = String(s[r]).replacingOccurrences(of: #"^\d{4}-"#, with: "", options: .regularExpression)
         return (time, s[r.upperBound...].trimmingCharacters(in: .whitespaces))
-    }
-}
-
-// MARK: - 頁尾動作
-
-struct DetailFooter: View {
-    @EnvironmentObject var store: ProgressStore
-    let project: ProjectProgress
-    @State private var copied = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button {
-                copyToPasteboard(Handoff.prompt(for: project))
-                withAnimation { copied = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { withAnimation { copied = false } }
-            } label: {
-                Label(copied ? "已複製" : "複製交接 prompt", systemImage: copied ? "checkmark" : "doc.on.clipboard")
-            }
-            Button {
-                NSWorkspace.shared.open(project.fileURL)
-            } label: {
-                Label("開啟進度檔", systemImage: "doc.text")
-            }
-            Spacer()
-            Menu {
-                if !project.projectPath.isEmpty {
-                    Button("在 Finder 顯示專案資料夾") { revealInFinder(project.projectPath) }
-                }
-                Button("在 Finder 顯示進度檔") { revealInFinder(project.fileURL.path) }
-                Divider()
-                Button("停止追蹤…", role: .destructive) { store.stopTracking(project) }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-        .buttonStyle(.borderless)
-        .font(.caption)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 }

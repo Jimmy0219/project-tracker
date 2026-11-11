@@ -2,50 +2,10 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// MARK: - 根畫面：清單頁 ⇄ 詳細頁
+// MARK: - 選單列面板：唯讀預覽，點專案在主視窗編輯
 
-struct ContentView: View {
+struct MenuPreviewView: View {
     @EnvironmentObject var store: ProgressStore
-    @State private var selectedID: String?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if let id = selectedID, let project = store.project(id: id) {
-                ProjectDetailView(project: project) { selectedID = nil }
-            } else {
-                ProjectListView { selectedID = $0 }
-            }
-            if let message = store.errorMessage {
-                ErrorBanner(message: message) { store.errorMessage = nil }
-            }
-        }
-        .frame(width: 400)
-        .onChange(of: store.projects.map(\.id)) { _, ids in
-            if let id = selectedID, !ids.contains(id) { selectedID = nil }
-        }
-    }
-}
-
-struct ErrorBanner: View {
-    let message: String
-    let onDismiss: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-            Text(message).font(.caption).frame(maxWidth: .infinity, alignment: .leading)
-            Button(action: onDismiss) { Image(systemName: "xmark") }.buttonStyle(.borderless)
-        }
-        .padding(10)
-        .background(Color.red.opacity(0.1))
-    }
-}
-
-// MARK: - 清單頁
-
-struct ProjectListView: View {
-    @EnvironmentObject var store: ProgressStore
-    let onSelect: (String) -> Void
     @State private var showDone = false
     @State private var showPaused = true
 
@@ -54,35 +14,37 @@ struct ProjectListView: View {
             header
             Divider()
             if store.projects.isEmpty {
-                EmptyStateView { add() }
+                EmptyStateView()
             } else {
                 ScrollView {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(store.active) { row($0, now: context.date) }
+                            ForEach(store.active) { PreviewRow(project: $0, now: context.date) }
                             if !store.paused.isEmpty {
                                 SectionToggle(title: "暫停", count: store.paused.count, isOn: $showPaused)
-                                if showPaused { ForEach(store.paused) { row($0, now: context.date) } }
+                                if showPaused { ForEach(store.paused) { PreviewRow(project: $0, now: context.date) } }
                             }
                             if !store.done.isEmpty {
                                 SectionToggle(title: "已完成", count: store.done.count, isOn: $showDone)
-                                if showDone { ForEach(store.done) { row($0, now: context.date) } }
+                                if showDone { ForEach(store.done) { PreviewRow(project: $0, now: context.date) } }
                             }
                         }
                         .padding(10)
                     }
                 }
-                .frame(maxHeight: 560)
+                .frame(maxHeight: 520)
             }
+            Divider()
+            Button {
+                MainWindowController.shared.show()
+            } label: {
+                Label("打開主視窗編輯", systemImage: "macwindow")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderless)
+            .padding(.vertical, 8)
         }
-    }
-
-    private func row(_ p: ProjectProgress, now: Date) -> some View {
-        ProjectRow(project: p, now: now) { onSelect(p.id) }
-    }
-
-    private func add() {
-        if let id = store.addProjectInteractively() { onSelect(id) }
+        .frame(width: 360)
     }
 
     private var header: some View {
@@ -92,10 +54,8 @@ struct ProjectListView: View {
                 Text(summary).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button(action: add) { Image(systemName: "plus") }
-                .help("新增要追蹤的專案")
-            Button { NSWorkspace.shared.open(store.projectsURL) } label: { Image(systemName: "folder") }
-                .help("在 Finder 開啟進度檔資料夾")
+            Button { MainWindowController.shared.show() } label: { Image(systemName: "macwindow") }
+                .help("打開主視窗")
             SettingsMenu()
         }
         .buttonStyle(.borderless)
@@ -138,12 +98,10 @@ struct SectionToggle: View {
     }
 }
 
-/// 清單中的精簡卡片：只放摘要，點擊進入分段的詳細頁。
-struct ProjectRow: View {
-    @EnvironmentObject var store: ProgressStore
+/// 預覽卡片：只顯示摘要，點擊在主視窗打開該專案。
+struct PreviewRow: View {
     let project: ProjectProgress
     let now: Date
-    let onOpen: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -156,7 +114,6 @@ struct ProjectRow: View {
                     .font(.caption)
                     .foregroundStyle(isStale ? .orange : .secondary)
                     .help(isStale ? "超過 7 天沒有更新" : project.updated.formatted(date: .abbreviated, time: .shortened))
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }
             if project.totalCount > 0 {
                 HStack(spacing: 8) {
@@ -198,26 +155,16 @@ struct ProjectRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(perform: onOpen)
+        .onTapGesture(perform: open)
+        .help("點擊在主視窗編輯")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(.default, onOpen)
-        .contextMenu {
-            Button("打開詳細內容", action: onOpen)
-            Menu("改狀態") {
-                StatusMenuItems(current: project.status) { store.setStatus(project, $0) }
-            }
-            Divider()
-            Button("複製交接 prompt") { copyToPasteboard(Handoff.prompt(for: project)) }
-            Button("開啟進度檔") { NSWorkspace.shared.open(project.fileURL) }
-            if !project.projectPath.isEmpty {
-                Button("在 Finder 顯示專案資料夾") { revealInFinder(project.projectPath) }
-            }
-            Divider()
-            Button("停止追蹤…", role: .destructive) { store.stopTracking(project) }
-        }
+        .accessibilityAction(.default, open)
+        .contextMenu { ProjectMenuItems(project: project) }
     }
+
+    private func open() { MainWindowController.shared.show(selecting: project.id) }
 
     private var isStale: Bool {
         project.status == .inProgress && now.timeIntervalSince(project.updated) > 7 * 86_400
@@ -232,12 +179,38 @@ struct ProjectRow: View {
     }
 }
 
+/// 專案的右鍵選單（選單列預覽與主視窗側欄共用）。
+struct ProjectMenuItems: View {
+    @EnvironmentObject var store: ProgressStore
+    let project: ProjectProgress
+
+    var body: some View {
+        Button("在主視窗編輯") { MainWindowController.shared.show(selecting: project.id) }
+        Menu("改狀態") {
+            StatusMenuItems(current: project.status) { store.setStatus(project, $0) }
+        }
+        Divider()
+        Button("複製交接 prompt") { copyToPasteboard(Handoff.prompt(for: project)) }
+        Button("開啟進度檔") { NSWorkspace.shared.open(project.fileURL) }
+        if !project.projectPath.isEmpty {
+            Button("在 Finder 顯示專案資料夾") { revealInFinder(project.projectPath) }
+        }
+        Divider()
+        Button("停止追蹤…", role: .destructive) { store.stopTracking(project) }
+    }
+}
+
 struct SettingsMenu: View {
     @EnvironmentObject var store: ProgressStore
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         Menu {
+            Button("打開主視窗") { MainWindowController.shared.show() }
+            Button("新增專案…") {
+                if let id = store.addProjectInteractively() { MainWindowController.shared.show(selecting: id) }
+            }
+            Divider()
             Toggle("登入時啟動", isOn: Binding(
                 get: { launchAtLogin },
                 set: { newValue in
@@ -250,6 +223,7 @@ struct SettingsMenu: View {
                     launchAtLogin = SMAppService.mainApp.status == .enabled
                 }
             ))
+            Button("在 Finder 開啟進度檔資料夾") { NSWorkspace.shared.open(store.projectsURL) }
             Button("重新整理") { store.reload() }
             Divider()
             Button("結束 Project Tracker") { NSApplication.shared.terminate(nil) }
@@ -263,17 +237,15 @@ struct SettingsMenu: View {
 }
 
 struct EmptyStateView: View {
-    let onAdd: () -> Void
-
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "tray").font(.largeTitle).foregroundStyle(.tertiary)
             Text("還沒有追蹤中的專案").font(.callout.weight(.medium))
-            Text("用 Claude Code 在專案裡工作，收工時會自動出現在這裡；\n也可以直接新增。")
+            Text("用 Claude Code 在專案裡工作，收工時會自動出現在這裡；\n也可以在主視窗新增。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("新增專案…", action: onAdd).controlSize(.small)
+            Button("打開主視窗") { MainWindowController.shared.show() }.controlSize(.small)
         }
         .padding(24)
         .frame(maxWidth: .infinity)
