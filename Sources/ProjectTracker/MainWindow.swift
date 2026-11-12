@@ -1,22 +1,21 @@
 import SwiftUI
 import AppKit
 
-/// 主視窗：左側專案清單，右側寬版編輯區。
+/// 主視窗：左側專案清單（可拖入 PROGRESS.md），右側編輯區。
 struct MainWindowView: View {
     @EnvironmentObject var store: ProgressStore
     @EnvironmentObject var model: MainWindowModel
+    @State private var dropTargeted = false
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView()
-                .frame(width: 260)
+            SidebarView().frame(width: 260)
             Divider()
             Group {
-                if model.selectedID == OnboardingBriefView.selectionID {
-                    OnboardingBriefView()
+                if model.selectedID == ImportGuideView.selectionID {
+                    ImportGuideView()
                 } else if let id = model.selectedID, let project = store.project(id: id) {
-                    ProjectEditorView(project: project)
-                        .id(project.id)  // 換專案時重設各區段的編輯狀態
+                    ProjectEditorView(project: project).id(project.id)
                 } else {
                     NoSelectionView()
                 }
@@ -24,6 +23,20 @@ struct MainWindowView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 720, minHeight: 480)
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 3)
+                    .background(Color.accentColor.opacity(0.08))
+                    .overlay(Label("放開以開始追蹤這個 PROGRESS.md", systemImage: "tray.and.arrow.down").font(.title3))
+                    .padding(8)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            loadFileURLs(providers) { urls in
+                if let id = store.importItems(urls) { model.selectedID = id }
+            }
+            return true
+        }
         .overlay(alignment: .bottom) {
             if let message = store.errorMessage {
                 ErrorBanner(message: message) { store.errorMessage = nil }
@@ -32,7 +45,7 @@ struct MainWindowView: View {
             }
         }
         .onChange(of: store.projects.map(\.id)) { _, ids in
-            if let id = model.selectedID, id != OnboardingBriefView.selectionID, !ids.contains(id) {
+            if let id = model.selectedID, id != ImportGuideView.selectionID, !ids.contains(id) {
                 model.selectedID = ids.first
             }
         }
@@ -51,11 +64,11 @@ struct SidebarView: View {
                 Text("專案").font(.headline)
                 Spacer()
                 Button {
-                    if let id = store.addProjectInteractively() { model.selectedID = id }
+                    if let id = store.importInteractively() { model.selectedID = id }
                 } label: {
-                    Label("新增專案", systemImage: "plus")
+                    Label("匯入", systemImage: "plus")
                 }
-                .help("選擇資料夾，開始追蹤一個專案")
+                .help("選擇專案的 PROGRESS.md（也可以直接拖進視窗）")
             }
             .padding(.horizontal, 12)
             .padding(.top, 12)
@@ -66,8 +79,7 @@ struct SidebarView: View {
                 TextField("搜尋專案", text: $model.search).textFieldStyle(.plain)
                 if !model.search.isEmpty {
                     Button { model.search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
                 }
             }
             .padding(6)
@@ -78,39 +90,50 @@ struct SidebarView: View {
             List(selection: $model.selectedID) {
                 group("進行中", filtered(store.active))
                 group("暫停", filtered(store.paused))
-                group("已完成", filtered(store.done))
+                group("完成", filtered(store.done))
+                if !store.missingPaths.isEmpty {
+                    Section("找不到檔案") {
+                        ForEach(store.missingPaths, id: \.self) { path in
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                                Text((path as NSString).deletingLastPathComponent.components(separatedBy: "/").last ?? path)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button("移除") { store.forgetMissing(path) }.controlSize(.small)
+                            }
+                            .help(path)
+                        }
+                    }
+                }
             }
             .listStyle(.sidebar)
             .overlay {
-                if store.projects.isEmpty {
+                if store.projects.isEmpty && store.missingPaths.isEmpty {
                     VStack(spacing: 8) {
-                        Text("還沒有追蹤中的專案").foregroundStyle(.secondary)
-                        Button("新增專案…") {
-                            if let id = store.addProjectInteractively() { model.selectedID = id }
-                        }
+                        Image(systemName: "tray.and.arrow.down").font(.title).foregroundStyle(.tertiary)
+                        Text("把 PROGRESS.md 拖進來").foregroundStyle(.secondary)
                     }
                 }
             }
 
             Divider()
             Button {
-                model.selectedID = OnboardingBriefView.selectionID
+                model.selectedID = ImportGuideView.selectionID
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass")
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("行前檔").font(.body.weight(.medium))
-                        Text("新專案匯入時 Claude 依此整理進度").font(.caption).foregroundStyle(.secondary)
+                        Text("匯入說明").font(.body.weight(.medium))
+                        Text("丟給 Claude，讓它建立 PROGRESS.md").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .contentShape(Rectangle())
-                .background(model.selectedID == OnboardingBriefView.selectionID ? Color.accentColor.opacity(0.18) : .clear)
+                .background(model.selectedID == ImportGuideView.selectionID ? Color.accentColor.opacity(0.18) : .clear)
             }
             .buttonStyle(.plain)
-            .help("編輯匯入新專案時給 Claude 的指引")
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
@@ -131,38 +154,29 @@ struct SidebarView: View {
     private func filtered(_ items: [ProjectProgress]) -> [ProjectProgress] {
         let q = model.search.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return items }
-        return items.filter { $0.name.localizedCaseInsensitiveContains(q) || $0.projectPath.localizedCaseInsensitiveContains(q) }
+        return items.filter { $0.name.localizedCaseInsensitiveContains(q) || $0.fileURL.path.localizedCaseInsensitiveContains(q) }
     }
 }
 
 struct SidebarRow: View {
-    @EnvironmentObject var store: ProgressStore
     let project: ProjectProgress
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            if store.onboarding.contains(project.id) {
-                ProgressView().controlSize(.mini).frame(width: 8, height: 8).padding(.top, 5)
-            } else {
-                Circle()
-                    .fill(StatusBadge.color(project.effectiveStatus))
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 5)
-            }
+            Circle()
+                .fill(project.isWorking ? Color.green : StatusBadge.color(project.status).opacity(0.6))
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
             VStack(alignment: .leading, spacing: 3) {
                 Text(project.name).font(.body.weight(.medium)).lineLimit(1)
                 HStack(spacing: 6) {
-                    if store.onboarding.contains(project.id) { Text("整理中…").foregroundStyle(.blue) }
-                    if project.totalCount > 0 { Text("\(project.doneCount)/\(project.totalCount)") }
-                    if !project.blockers.isEmpty {
-                        Label("\(project.blockers.count)", systemImage: SectionStyle.icon(.blockers))
-                            .foregroundStyle(SectionStyle.tint(.blockers))
+                    if project.isWorking { Text("工作中").foregroundStyle(.green) }
+                    if !project.tasks.isEmpty { Text("\(project.doneCount)/\(project.tasks.count)") }
+                    if project.attentionCount > 0 {
+                        Label("\(project.decisions.count)", systemImage: SectionStyle.icon(.decisions))
+                            .foregroundStyle(SectionStyle.tint(.decisions))
                     }
-                    if project.pendingCount > 0 {
-                        Label("\(project.pendingCount)", systemImage: "hourglass")
-                            .foregroundStyle(SectionStyle.pending)
-                    }
-                    Text(relativeTime(project.updated))
+                    if !project.isWorking { Text(relativeTime(project.updated)) }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -174,17 +188,18 @@ struct SidebarRow: View {
 }
 
 struct NoSelectionView: View {
-    @EnvironmentObject var store: ProgressStore
     @EnvironmentObject var model: MainWindowModel
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sidebar.left").font(.system(size: 36)).foregroundStyle(.tertiary)
-            Text("從左側選一個專案開始編輯").foregroundStyle(.secondary)
-            Button("新增專案…") {
-                if let id = store.addProjectInteractively() { model.selectedID = id }
-            }
+        VStack(spacing: 12) {
+            Image(systemName: "tray.and.arrow.down").font(.system(size: 40)).foregroundStyle(.tertiary)
+            Text("把專案的 PROGRESS.md 拖進這個視窗開始追蹤").font(.title3)
+            Text("還沒有 PROGRESS.md？先把「匯入說明」丟給該專案的 Claude Code。")
+                .foregroundStyle(.secondary)
+            Button("查看匯入說明") { model.selectedID = ImportGuideView.selectionID }
+                .buttonStyle(.borderedProminent)
         }
+        .padding()
     }
 }
 

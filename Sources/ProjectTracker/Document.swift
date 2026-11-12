@@ -1,33 +1,32 @@
 import Foundation
 
-/// 進度檔的區段種類與標準標題（新建區段時使用的順序也依此）。
+/// PROGRESS.md 的區段與標準標題（新建區段時也依此順序）。
 enum SectionKind: CaseIterable {
-    case state, next, todo, blockers, history
+    case goal, now, tasks, decisions, log
 
     var title: String {
         switch self {
-        case .state: return "目前狀態"
-        case .next: return "下一步"
-        case .todo: return "待辦"
-        case .blockers: return "卡關／待決事項"
-        case .history: return "歷程"
+        case .goal: return "目標"
+        case .now: return "現在"
+        case .tasks: return "任務"
+        case .decisions: return "等你決定"
+        case .log: return "紀錄"
         }
     }
 
-    /// 比對既有標題用的關鍵字（agent 可能寫成英文或略有不同）。
+    /// 比對既有標題用的關鍵字（容許 agent 寫得略有不同）。
     var keys: [String] {
         switch self {
-        case .state: return ["目前狀態", "Status", "狀態"]
-        case .next: return ["下一步", "Next"]
-        case .todo: return ["待辦", "TODO", "Todo", "Tasks"]
-        case .blockers: return ["卡關", "待決", "Blocker"]
-        case .history: return ["歷程", "History", "Log"]
+        case .goal: return ["目標", "Goal"]
+        case .now: return ["現在", "目前", "狀態", "Now", "Status"]
+        case .tasks: return ["任務", "待辦", "TODO", "Tasks"]
+        case .decisions: return ["等你決定", "待決", "決定", "卡關", "Decision", "Question"]
+        case .log: return ["紀錄", "歷程", "Log", "History"]
         }
     }
 
     static func match(_ title: String) -> SectionKind? {
-        // 先比對較明確的種類，避免「狀態」誤配到其他標題
-        for kind in [SectionKind.blockers, .next, .todo, .history, .state]
+        for kind in [SectionKind.decisions, .tasks, .log, .goal, .now]
         where kind.keys.contains(where: { title.contains($0) }) {
             return kind
         }
@@ -35,13 +34,11 @@ enum SectionKind: CaseIterable {
     }
 }
 
-/// 可讀可寫的進度檔：保留 frontmatter 原始行、未知區段與其順序，只改寫被編輯的區段。
+/// 可讀可寫的進度檔：保留 frontmatter 原始行、未知區段與順序，只改寫被編輯的區段。
 struct ProgressDocument {
     var frontLines: [String]
     var preamble: [String]
     var sections: [(title: String, lines: [String])]
-
-    // MARK: 解析與輸出
 
     static func parse(_ text: String) -> ProgressDocument {
         var lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
@@ -72,7 +69,6 @@ struct ProgressDocument {
             out.append("## \(s.title)")
             out += s.lines
         }
-        // 收斂檔尾空行
         while out.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { out.removeLast() }
         return out.joined(separator: "\n") + "\n"
     }
@@ -116,7 +112,6 @@ struct ProgressDocument {
             sections[i].lines = newLines
             return
         }
-        // 缺少該區段：依標準順序插在後一個已存在的已知區段之前
         let order = SectionKind.allCases
         let myRank = order.firstIndex(of: kind)!
         let insertAt = sections.firstIndex(where: {
@@ -124,6 +119,11 @@ struct ProgressDocument {
             return r > myRank
         }) ?? sections.count
         sections.insert((title: kind.title, lines: newLines), at: insertAt)
+    }
+
+    private mutating func setText(_ kind: SectionKind, _ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        setLines(kind, [""] + (t.isEmpty ? [] : t.components(separatedBy: "\n")) + [""])
     }
 
     private mutating func setList(_ kind: SectionKind, _ items: [String], empty: String? = nil) {
@@ -136,38 +136,35 @@ struct ProgressDocument {
     var name: String? { value("project").flatMap { $0.isEmpty ? nil : $0 } }
     var status: ProjectStatus { ProjectStatus(raw: value("status") ?? "") }
 
-    var currentState: String {
-        get { ProgressParser.meaningful(lines(.state)).joined(separator: "\n") }
-        set {
-            let text = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            setLines(.state, [""] + (text.isEmpty ? [] : text.components(separatedBy: "\n")) + [""])
-        }
+    var goal: String {
+        get { ProgressParser.meaningful(lines(.goal)).joined(separator: " ") }
+        set { setText(.goal, newValue) }
     }
 
-    var nextSteps: [String] {
-        get { ProgressParser.listItems(lines(.next)) }
-        set { setList(.next, newValue.map { "- \($0)" }) }
+    var now: String {
+        get { ProgressParser.meaningful(lines(.now)).joined(separator: " ") }
+        set { setText(.now, newValue) }
     }
 
-    var todos: [TodoItem] {
-        get { ProgressParser.todos(lines(.todo)) }
-        set { setList(.todo, newValue.map { "- \($0.state.marker) \($0.text)" }) }
+    var tasks: [TaskItem] {
+        get { ProgressParser.tasks(lines(.tasks)) }
+        set { setList(.tasks, newValue.map { "- [\($0.done ? "x" : " ")] \($0.text)" }) }
     }
 
-    var blockers: [String] {
-        get { ProgressParser.listItems(lines(.blockers)) }
-        set { setList(.blockers, newValue.map { "- \($0)" }, empty: "（無）") }
+    var decisions: [String] {
+        get { ProgressParser.listItems(lines(.decisions)) }
+        set { setList(.decisions, newValue.map { "- \($0)" }, empty: "（無）") }
     }
 
-    var history: [String] { ProgressParser.listItems(lines(.history)) }
+    var log: [String] { ProgressParser.listItems(lines(.log)) }
 
-    mutating func appendHistory(_ message: String) {
-        var l = lines(.history)
+    mutating func appendLog(_ message: String) {
+        var l = lines(.log)
         while l.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { l.removeLast() }
         if l.isEmpty { l = [""] }
         l.append("- \(Self.shortNow()) \(message)")
         l.append("")
-        setLines(.history, l)
+        setLines(.log, l)
     }
 
     static func shortNow() -> String {
@@ -176,22 +173,14 @@ struct ProgressDocument {
         f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: Date())
     }
-
-    static func isoNow() -> String {
-        let f = ISO8601DateFormatter()
-        f.timeZone = .current
-        f.formatOptions = [.withInternetDateTime]
-        return f.string(from: Date())
-    }
 }
 
-/// 以「重新讀檔 → 修改 → 原子寫回」的方式編輯，減少和 agent 同時寫入時互相覆蓋的機會。
+/// 「重新讀檔 → 修改 → 原子寫回」，降低和正在工作的 Claude 互相覆蓋的機會。
 enum ProgressEditor {
     static func mutate(_ url: URL, _ change: (inout ProgressDocument) -> Void) throws {
         let text = try String(contentsOf: url, encoding: .utf8)
         var doc = ProgressDocument.parse(text)
         change(&doc)
-        doc.set("updated", ProgressDocument.isoNow())
         try doc.serialize().write(to: url, atomically: true, encoding: .utf8)
     }
 }
