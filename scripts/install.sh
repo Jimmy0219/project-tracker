@@ -27,6 +27,15 @@ install -m 755 "$ROOT/bin/ptrack" "$PT_HOME/bin/ptrack"
 ln -sf "$PT_HOME/bin/ptrack" "$HOME/.local/bin/ptrack"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "  ⚠ ~/.local/bin 不在 PATH，規則中會改用絕對路徑" ;; esac
 
+echo "▸ 安裝行前檔"
+mkdir -p "$PT_HOME/templates"
+install -m 644 "$ROOT/templates/onboarding.md" "$PT_HOME/templates/onboarding.default.md"
+if [[ -f "$PT_HOME/onboarding.md" ]]; then
+  echo "  已有行前檔，保留你的版本（預設版放在 templates/onboarding.default.md）"
+else
+  install -m 644 "$ROOT/templates/onboarding.md" "$PT_HOME/onboarding.md"
+fi
+
 echo "▸ 更新 ~/.claude/CLAUDE.md"
 mkdir -p "$CLAUDE_DIR"
 touch "$CLAUDE_DIR/CLAUDE.md"

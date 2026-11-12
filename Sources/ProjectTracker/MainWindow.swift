@@ -12,7 +12,9 @@ struct MainWindowView: View {
                 .frame(width: 260)
             Divider()
             Group {
-                if let id = model.selectedID, let project = store.project(id: id) {
+                if model.selectedID == OnboardingBriefView.selectionID {
+                    OnboardingBriefView()
+                } else if let id = model.selectedID, let project = store.project(id: id) {
                     ProjectEditorView(project: project)
                         .id(project.id)  // 換專案時重設各區段的編輯狀態
                 } else {
@@ -30,7 +32,9 @@ struct MainWindowView: View {
             }
         }
         .onChange(of: store.projects.map(\.id)) { _, ids in
-            if let id = model.selectedID, !ids.contains(id) { model.selectedID = ids.first }
+            if let id = model.selectedID, id != OnboardingBriefView.selectionID, !ids.contains(id) {
+                model.selectedID = ids.first
+            }
         }
     }
 }
@@ -87,6 +91,26 @@ struct SidebarView: View {
                     }
                 }
             }
+
+            Divider()
+            Button {
+                model.selectedID = OnboardingBriefView.selectionID
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("行前檔").font(.body.weight(.medium))
+                        Text("新專案匯入時 Claude 依此整理進度").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
+                .background(model.selectedID == OnboardingBriefView.selectionID ? Color.accentColor.opacity(0.18) : .clear)
+            }
+            .buttonStyle(.plain)
+            .help("編輯匯入新專案時給 Claude 的指引")
         }
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
     }
@@ -112,17 +136,23 @@ struct SidebarView: View {
 }
 
 struct SidebarRow: View {
+    @EnvironmentObject var store: ProgressStore
     let project: ProjectProgress
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Circle()
-                .fill(StatusBadge.color(project.effectiveStatus))
-                .frame(width: 8, height: 8)
-                .padding(.top, 5)
+            if store.onboarding.contains(project.id) {
+                ProgressView().controlSize(.mini).frame(width: 8, height: 8).padding(.top, 5)
+            } else {
+                Circle()
+                    .fill(StatusBadge.color(project.effectiveStatus))
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 5)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(project.name).font(.body.weight(.medium)).lineLimit(1)
                 HStack(spacing: 6) {
+                    if store.onboarding.contains(project.id) { Text("整理中…").foregroundStyle(.blue) }
                     if project.totalCount > 0 { Text("\(project.doneCount)/\(project.totalCount)") }
                     if !project.blockers.isEmpty {
                         Label("\(project.blockers.count)", systemImage: SectionStyle.icon(.blockers))

@@ -24,6 +24,15 @@ Claude Code session ──(收工前更新)──▶ ~/.project-tracker/projects
 - 主視窗可自由調整大小、拖到任何螢幕，下次打開會記得位置；開著時 App 會出現在 Dock 與 ⌘Tab，關掉後回到只在選單列待命
 - 從 Finder／Spotlight 打開 App 會直接顯示主視窗；設定「登入時啟動」時開機只會待在選單列
 
+### 行前檔：匯入既有專案時自動整理進度
+
+- **行前檔**（`~/.project-tracker/onboarding.md`）是給 Claude 的匯入指引：要看哪些來源、怎麼歸納、寫成什麼格式、有哪些規則。主視窗側欄最下方「行前檔」可直接編輯（⌘S 儲存、可還原預設）
+- 在主視窗「新增專案」選資料夾後，App 會在背景執行 `ptrack onboard`：Claude Code（`claude -p`）讀行前檔，從**專案文件、git 紀錄、過去的 Claude Code 對話與 memory、程式碼裡的 TODO／FIXME** 歸納出目前狀態、下一步、待辦、卡關與歷程，寫入進度檔
+- 整理中會在側欄、選單列與編輯區顯示狀態；完成後顯示 Claude 的回報。推測完成的待辦標成 ⏳ 待確認、不確定的事放進「卡關／待決事項」，方便你核對
+- 已追蹤的專案可從「更多」或右鍵選「用行前檔重新整理」；整理紀錄存在 `~/.project-tracker/logs/`
+- **權限限制**：匯入用的 Claude 以 `--permission-mode dontAsk` 執行，只允許讀取（Read／Glob／Grep、唯讀的 git／ls／jq 等指令）與寫入**該專案的進度檔**；不會修改專案檔案，也不會留下 session 紀錄
+- 需要能在終端機正常使用的 Claude Code；若出現 401／token 過期，執行 `claude auth login` 重新登入
+
 ### 在主視窗裡編輯
 
 - **分段顯示**：目前狀態、下一步、待辦、卡關／待決事項、歷程各自成塊，有專屬顏色與圖示（側欄與選單列的小標籤用同樣配色）
@@ -115,6 +124,7 @@ RAG 檢索模組完成，正在調整 chunk 大小。
 | `ptrack stamp [路徑] [--agent 名稱]` | 更新 `updated`／`agent` 欄位 |
 | `ptrack list` | 列出所有追蹤中的專案 |
 | `ptrack root [路徑]` | 印出判定的專案根目錄 |
+| `ptrack onboard [路徑] [--model M] [--print]` | 依行前檔請 Claude 整理既有進度並寫入進度檔；`--print` 只印出 prompt |
 | `ptrack hook-stop` | Claude Code Stop hook 入口（從 stdin 讀 JSON） |
 
 `[路徑]` 省略時使用目前目錄；位於 git repo 內時以 repo 根目錄為專案。
@@ -145,11 +155,13 @@ Sources/ProjectTracker/         SwiftUI 選單列 App
   MainWindow.swift              主視窗：側欄清單（搜尋、新增）
   EditorView.swift              主視窗編輯區：頁首與各區段的編輯功能
   MenuPreview.swift             選單列唯讀預覽、右鍵選單、設定
+  OnboardingBriefView.swift     行前檔編輯器
   Components.swift              共用元件（區段框、可編輯列、新增欄位、配色）
   Handoff.swift                 交接 prompt 產生
 Resources/Info.plist            App 設定（LSUIElement：不顯示在 Dock）
 Resources/AppIcon.icns          App 圖示（由 scripts/make-icon.swift 產生）
 templates/claude-md-snippet.md  寫入 ~/.claude/CLAUDE.md 的規則
+templates/onboarding.md         預設行前檔（安裝時複製到 ~/.project-tracker/onboarding.md）
 scripts/build-app.sh            用 swiftc 編譯並打包 .app
 scripts/install.sh              一鍵安裝
 scripts/make-icon.swift         用程式繪製 App 圖示並輸出 iconset

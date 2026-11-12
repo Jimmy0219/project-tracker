@@ -100,6 +100,7 @@ struct SectionToggle: View {
 
 /// 預覽卡片：只顯示摘要，點擊在主視窗打開該專案。
 struct PreviewRow: View {
+    @EnvironmentObject var store: ProgressStore
     let project: ProjectProgress
     let now: Date
     @State private var hovering = false
@@ -131,6 +132,9 @@ struct PreviewRow: View {
                     Image(systemName: SectionStyle.icon(.next)).foregroundStyle(SectionStyle.tint(.next))
                 }
                 .font(.callout)
+            }
+            if store.onboarding.contains(project.id) {
+                CountChip(icon: "wand.and.stars", text: "Claude 整理中…", tint: .blue)
             }
             if !project.blockers.isEmpty || project.pendingCount > 0 {
                 HStack(spacing: 6) {
@@ -189,6 +193,8 @@ struct ProjectMenuItems: View {
         Menu("改狀態") {
             StatusMenuItems(current: project.status) { store.setStatus(project, $0) }
         }
+        Button("用行前檔重新整理") { store.startOnboarding(project) }
+            .disabled(store.onboarding.contains(project.id) || project.projectPath.isEmpty)
         Divider()
         Button("複製交接 prompt") { copyToPasteboard(Handoff.prompt(for: project)) }
         Button("開啟進度檔") { NSWorkspace.shared.open(project.fileURL) }

@@ -12,16 +12,23 @@ macOS 選單列 App 負責即時彙整顯示。
   ptrack log   [路徑] 訊息...     在「歷程」區段追加一行（自動加時間戳）
   ptrack list                    列出所有追蹤中的專案
   ptrack root  [路徑]           印出判定的專案根目錄
+  ptrack onboard [路徑] [--model M] [--print]
+                                 依行前檔（~/.project-tracker/onboarding.md）呼叫 Claude Code，
+                                 從既有文件、git、過去對話與程式碼歸納進度並寫入進度檔；
+                                 --print 只印出要送給 Claude 的 prompt
   ptrack hook-stop               Claude Code Stop hook（從 stdin 讀 JSON）
 
 [路徑] 省略時使用目前目錄；若位於 git repo 內，以 repo 根目錄為專案根目錄。
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -330,9 +337,133 @@ def cmd_hook_stop(_args: list[str]) -> int:
     return 0
 
 
+# ---------- 行前檔匯入 ----------
+
+ONBOARDING_FILE = HOME_DIR / "onboarding.md"
+LOGS_DIR = HOME_DIR / "logs"
+READ_ONLY_TOOLS = [
+    "Read", "Glob", "Grep",
+    "Bash(git log:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git branch:*)",
+    "Bash(git show:*)", "Bash(git rev-parse:*)", "Bash(ls:*)", "Bash(jq:*)",
+    "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+]
+
+
+def claude_project_dir(root: Path) -> Path:
+    """Claude Code 存放該資料夾 session 紀錄的位置：路徑中非英數字元都換成 -。"""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(root))
+
+
+def find_claude() -> str | None:
+    candidates = [
+        os.environ.get("PTRACK_CLAUDE"),
+        shutil.which("claude"),
+        str(Path.home() / ".local/bin/claude"),
+        str(Path.home() / ".claude/local/claude"),
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+    ]
+    for c in candidates:
+        if c and Path(c).is_file() and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def is_git_repo(root: Path) -> bool:
+    try:
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+                             capture_output=True, text=True, timeout=5)
+        return out.returncode == 0 and out.stdout.strip() == "true"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def build_onboard_prompt(root: Path, pfile: Path) -> str:
+    if not ONBOARDING_FILE.is_file():
+        sys.exit(f"ptrack: 找不到行前檔 {ONBOARDING_FILE}，請重新執行 scripts/install.sh")
+    brief = ONBOARDING_FILE.read_text(encoding="utf-8").strip()
+    cdir = claude_project_dir(root)
+    sessions = sorted(cdir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True) if cdir.is_dir() else []
+    if sessions:
+        recent = "\n".join(
+            f"  - {s.name}（{datetime.fromtimestamp(s.stat().st_mtime).strftime('%Y-%m-%d %H:%M')}，"
+            f"{s.stat().st_size // 1024} KB）" for s in sessions[:5])
+        convo = f"{cdir}（共 {len(sessions)} 個 session，最近的幾個：\n{recent}）"
+        if (cdir / "memory").is_dir():
+            convo += f"\n  - memory 資料夾：{cdir / 'memory'}"
+    else:
+        convo = "沒有找到這個資料夾的 Claude Code 對話紀錄"
+    current = pfile.read_text(encoding="utf-8") if pfile.exists() else ""
+    return f"""{brief}
+
+---
+
+## 這次匯入的資訊
+
+- 專案根目錄（你的工作目錄）：{root}
+- 進度檔（**唯一可以修改的檔案**）：{pfile}
+- git repo：{"是" if is_git_repo(root) else "否"}
+- 過去的 Claude Code 對話：{convo}
+- 現在時間：{now_short()}（台北時間）
+
+進度檔目前的內容如下（這是格式範本，括號內的佔位文字請換成實際內容；請直接編輯這個檔案）：
+
+```markdown
+{current.rstrip()}
+```
+"""
+
+
+def cmd_onboard(args: list[str]) -> int:
+    model = pop_opt(args, "--model") or os.environ.get("PTRACK_ONBOARD_MODEL")
+    print_only = "--print" in args
+    args = [a for a in args if a != "--print"]
+    root = project_root(args[0] if args else None)
+    pfile = progress_file(root)
+    if not pfile.exists():
+        with contextlib.redirect_stdout(io.StringIO()):  # 不讓路徑混進回報
+            cmd_init([str(root)])
+    prompt = build_onboard_prompt(root, pfile)
+    if print_only:
+        print(prompt)
+        return 0
+
+    claude = find_claude()
+    if not claude:
+        sys.exit("ptrack: 找不到 claude 指令，請先安裝 Claude Code，或用環境變數 PTRACK_CLAUDE 指定路徑")
+    allowed = READ_ONLY_TOOLS + [f"Edit(/{pfile})", f"Write(/{pfile})"]
+    cmd = [claude, "-p", "--permission-mode", "dontAsk", "--no-session-persistence",
+           "--add-dir", str(PROJECTS_DIR)]
+    cdir = claude_project_dir(root)
+    if cdir.is_dir():
+        cmd += ["--add-dir", str(cdir)]
+    if model:
+        cmd += ["--model", model]
+    cmd += ["--allowedTools", ",".join(allowed)]
+
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    log = LOGS_DIR / f"{pfile.stem}.log"
+    before = pfile.stat().st_mtime
+    env = dict(os.environ, PTRACK_DISABLE="1")  # 避免 Stop hook 干擾匯入用的 session
+    with log.open("w", encoding="utf-8") as fh:
+        fh.write(f"# {now_iso()} ptrack onboard {root}\n# {' '.join(cmd[:-1])} <allowedTools>\n\n")
+        fh.flush()
+        proc = subprocess.run(cmd, input=prompt, text=True, cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        fh.write(proc.stdout or "")
+    print((proc.stdout or "").strip())
+    if proc.returncode != 0:
+        print(f"ptrack: Claude 執行失敗（代碼 {proc.returncode}），紀錄：{log}", file=sys.stderr)
+        return proc.returncode
+    if pfile.stat().st_mtime <= before:
+        print(f"ptrack: Claude 沒有更新進度檔，紀錄：{log}", file=sys.stderr)
+        return 3
+    return 0
+
+
 COMMANDS = {
     "file": cmd_file, "root": cmd_root, "init": cmd_init, "stamp": cmd_stamp,
-    "log": cmd_log, "list": cmd_list, "hook-stop": cmd_hook_stop,
+    "log": cmd_log, "list": cmd_list, "onboard": cmd_onboard, "hook-stop": cmd_hook_stop,
 }
 
 

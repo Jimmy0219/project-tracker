@@ -3,11 +3,13 @@ import AppKit
 
 /// 主視窗右側的編輯區：頁首（名稱、狀態、動作）＋各區段；寬度足夠時分成左右兩欄。
 struct ProjectEditorView: View {
+    @EnvironmentObject var store: ProgressStore
     let project: ProjectProgress
 
     var body: some View {
         VStack(spacing: 0) {
             EditorHeader(project: project)
+            OnboardingBanner(project: project)
             Divider()
             GeometryReader { geo in
                 ScrollView {
@@ -126,6 +128,11 @@ struct EditorHeader: View {
                 }
                 Spacer()
                 Menu {
+                    Button("用行前檔重新整理") { store.startOnboarding(project) }
+                        .disabled(store.onboarding.contains(project.id) || project.projectPath.isEmpty)
+                    Button("查看整理紀錄") { NSWorkspace.shared.open(store.logURL(for: project)) }
+                        .disabled(!FileManager.default.fileExists(atPath: store.logURL(for: project).path))
+                    Divider()
                     Button("在 Finder 顯示進度檔") { revealInFinder(project.fileURL.path) }
                     Divider()
                     Button("停止追蹤…", role: .destructive) { store.stopTracking(project) }
@@ -472,5 +479,50 @@ struct HistoryEntry: View {
         }
         let time = String(s[r]).replacingOccurrences(of: #"^\d{4}-"#, with: "", options: .regularExpression)
         return (time, s[r.upperBound...].trimmingCharacters(in: .whitespaces))
+    }
+}
+
+
+// MARK: - 行前檔整理狀態
+
+/// 整理中顯示提示；整理完成後顯示 Claude 的回報（可關閉）。
+struct OnboardingBanner: View {
+    @EnvironmentObject var store: ProgressStore
+    let project: ProjectProgress
+
+    var body: some View {
+        if store.onboarding.contains(project.id) {
+            banner(tint: .blue) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Claude 正在依行前檔整理既有進度…").font(.callout.weight(.semibold))
+                    Text("會閱讀專案文件、git 紀錄、過去的對話與程式碼，通常需要 1～5 分鐘。完成前先不要編輯，以免內容被覆蓋。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        } else if let report = store.onboardingReports[project.id] {
+            banner(tint: .green) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("已依行前檔整理完成，請檢查內容；⏳ 待確認的待辦與「卡關／待決事項」是 Claude 不確定、需要你確認的地方。")
+                        .font(.callout.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(report).font(.caption).foregroundStyle(.secondary).lineLimit(4).textSelection(.enabled)
+                }
+                Spacer()
+                Button { store.onboardingReports[project.id] = nil } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .help("關閉")
+            }
+        }
+    }
+
+    private func banner<Content: View>(tint: Color, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 10) { content() }
+            .padding(12)
+            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 18)
+            .padding(.bottom, 12)
     }
 }
